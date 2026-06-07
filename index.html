@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>本亦运营后台 V2</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <div class="brand-badge">本亦</div>
+        <h1>本亦运营后台 V2</h1>
+        <p>学校作战 · UGC 活动 · 门店日报 · 工作汇总</p>
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>账号</span>
+            <input id="loginUsername" autocomplete="username" required placeholder="admin" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="admin123" />
+          </label>
+          <button class="btn btn-primary" type="submit">登录后台</button>
+        </form>
+        <div class="login-hint">
+          <strong>默认老板账号：</strong>admin / admin123
+        </div>
+      </div>
+    </section>
+
+    <div class="app" id="appShell" hidden>
+      <aside class="sidebar">
+        <div class="side-brand">
+          <div class="brand-badge small">本亦</div>
+          <div>
+            <strong>本亦运营后台</strong>
+            <span>V2 数据库版</span>
+          </div>
+        </div>
+        <nav class="nav" id="navMenu"></nav>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">首页总看板</h1>
+            <p id="pageSubtitle">朝阳学生家庭入口 · 校服业务增长后台</p>
+          </div>
+          <div class="user-box">
+            <span id="currentUserText"></span>
+            <button class="btn btn-ghost" id="logoutBtn" type="button">退出</button>
+          </div>
+        </header>
+
+        <main id="pageContent"></main>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">编辑数据</p>
+            <h2 id="modalTitle">新增</h2>
+          </div>
+          <button class="icon-btn" id="modalCloseBtn" type="button" aria-label="关闭">×</button>
+        </div>
+        <form id="modalForm" class="modal-form"></form>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+  </body>
+</html>

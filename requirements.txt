@@ -1,0 +1,3 @@
+# 本亦运营后台 V2 当前使用 Python 标准库实现。
+# Render 构建时会执行 `pip install -r requirements.txt`。
+# 这里暂时不需要第三方包。

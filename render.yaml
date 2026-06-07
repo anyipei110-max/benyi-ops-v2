@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: benyi-ops-v2
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: BENYI_HOST
+        value: 0.0.0.0
+      - key: BENYI_DATA_DIR
+        value: /var/data
+      - key: BENYI_ADMIN_PASSWORD
+        sync: false
+      - key: BENYI_DEFAULT_STAFF_PASSWORD
+        sync: false
+    disk:
+      name: benyi-data
+      mountPath: /var/data
+      sizeGB: 1
