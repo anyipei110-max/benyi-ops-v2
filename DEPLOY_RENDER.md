@@ -1,128 +1,118 @@
-# 本亦运营后台 V2：Render 线上部署说明
+# 本亦运营后台 V2：Render 免费路线部署说明
 
 这份说明用于把本亦运营后台部署成员工可以通过公开网址访问的网站。
 
-## 已经为线上部署做好的改造
+## 当前推荐方案
 
-- 后端监听 `0.0.0.0`，符合 Render Web Service 的公开访问要求。
+为了避免在中国付款不方便，本项目现在推荐：
+
+1. Render 免费 Web Service 跑网站。
+2. 免费云 PostgreSQL 保存数据。
+3. Render 里填写 `DATABASE_URL` 连接云数据库。
+
+这样不需要购买 Render Persistent Disk，服务重启后数据也不会因为网站文件系统清空而丢失。
+
+## 已经做好的线上改造
+
+- 后端监听 `0.0.0.0`，符合 Render Web Service 公开访问要求。
 - 自动读取 Render 提供的 `PORT` 端口。
-- 数据库目录支持环境变量 `BENYI_DATA_DIR`。
-- Render 上推荐把 `BENYI_DATA_DIR` 设置为 `/var/data`。
-- `render.yaml` 已配置 Persistent Disk，数据库会保存到 `/var/data/benyi_v2.sqlite`。
+- 本地没设置 `DATABASE_URL` 时，自动使用 SQLite。
+- 线上设置 `DATABASE_URL` 后，自动使用 PostgreSQL。
 - 已添加 `/api/health` 健康检查接口。
-- 已添加 `requirements.txt`。
-- 本地仍可用 `python3 server.py` 运行。
+- 已添加 `requirements.txt`，Render 会自动安装 PostgreSQL 驱动。
+- `render.yaml` 已改成免费 Web Service 配置。
 
-## 重要说明：数据库怎么保证不丢
+## 第一步：准备免费云数据库
 
-当前线上版为了简单和稳定，继续使用 SQLite，但数据库文件不再放在你电脑上。
+任选一个即可：
 
-Render 部署后，数据库文件会放在 Render Persistent Disk：
+- Supabase：https://supabase.com
+- Neon：https://neon.tech
 
-```text
-/var/data/benyi_v2.sqlite
-```
+你需要创建一个 PostgreSQL 数据库，然后复制连接地址。
 
-只要 Render Web Service 绑定了 Persistent Disk，服务重启、重新部署后数据都不会丢。
-
-不要把数据库写到项目目录里，因为 Render 普通文件系统是临时的，重启或重新部署后会丢。
-
-## 第一步：把项目上传到 GitHub
-
-### 1. 在 GitHub 创建仓库
-
-1. 打开 GitHub。
-2. 点击右上角 `+`。
-3. 选择 `New repository`。
-4. 仓库名可以叫：
+连接地址一般长这样：
 
 ```text
-benyi-ops-v2
+postgresql://用户名:密码@主机地址:5432/数据库名?sslmode=require
 ```
 
-5. 选择 Private 或 Public 都可以。
-6. 不要勾选初始化 README。
-7. 点击 `Create repository`。
+这个地址后面要填到 Render 的环境变量：
 
-### 2. 在本机终端上传代码
-
-打开终端，执行：
-
-```bash
-cd "/Users/xuzirui/Documents/Codex/2026-06-06/0-mvp-1-2-3-4"
-git init
-git add .
-git commit -m "Deployable Benyi ops backend V2"
-git branch -M main
+```text
+DATABASE_URL
 ```
 
-然后把下面的地址替换成你自己的 GitHub 仓库地址：
+注意：这个地址相当于数据库钥匙，不要发到微信群，也不要截图公开。
 
-```bash
-git remote add origin https://github.com/你的用户名/benyi-ops-v2.git
-git push -u origin main
+## 第二步：确认 GitHub 仓库有这些文件
+
+你的仓库里应该有：
+
+```text
+server.py
+index.html
+styles.css
+app.js
+requirements.txt
+render.yaml
+README.md
+DEPLOY_RENDER.md
 ```
 
-如果 GitHub 要求登录，按终端提示操作即可。
-
-## 第二步：在 Render 创建 Web Service
-
-推荐用 `render.yaml` Blueprint 创建：
+## 第三步：在 Render 创建 Web Service
 
 1. 打开 Render。
-2. 点击 `New +`。
-3. 选择 `Blueprint`。
-4. 连接刚刚上传的 GitHub 仓库。
-5. Render 会读取项目里的 `render.yaml`。
-6. 设置环境变量：
+2. 点击右上角 `New +`。
+3. 选择 `Web Service`。
+4. 选择 GitHub 仓库：
 
 ```text
-BENYI_ADMIN_PASSWORD=你想设置的老板初始密码
-BENYI_DEFAULT_STAFF_PASSWORD=你想设置的员工初始密码
+anyipei110-max/benyi-ops-v2
 ```
 
-7. 确认创建。
-
-如果你不用 Blueprint，也可以手动创建 Web Service：
-
-- Runtime：Python
-- Build Command：
-
-```bash
-pip install -r requirements.txt
-```
-
-- Start Command：
-
-```bash
-python3 server.py
-```
-
-- Health Check Path：
+5. 配置如下：
 
 ```text
-/api/health
+Name: benyi-ops-v2
+Language: Python 3
+Branch: main
+Region: Oregon 或 Singapore
+Root Directory: 留空
+Build Command: pip install -r requirements.txt
+Start Command: python3 server.py
 ```
 
-- Environment Variables：
+6. Instance Type 选择免费或可用的最低套餐即可。
+
+## 第四步：填写环境变量
+
+在 Render 的 Environment Variables 里添加：
 
 ```text
 BENYI_HOST=0.0.0.0
-BENYI_DATA_DIR=/var/data
+DATABASE_URL=你的云 PostgreSQL 连接地址
 BENYI_ADMIN_PASSWORD=你想设置的老板初始密码
 BENYI_DEFAULT_STAFF_PASSWORD=你想设置的员工初始密码
 ```
 
-- Persistent Disk：
+不要再添加 Persistent Disk，也不要设置 `BENYI_DATA_DIR=/var/data`。
+
+## 第五步：创建并等待部署
+
+点击：
 
 ```text
-Mount Path: /var/data
-Size: 1 GB 或更高
+Create Web Service
 ```
 
-## 第三步：部署后员工打开哪个网址
+等待 Render 显示：
 
-Render 部署成功后，会给你一个公开网址，类似：
+```text
+Live
+```
+
+部署成功后，Render 会给你一个公开网址，类似：
 
 ```text
 https://benyi-ops-v2.onrender.com
@@ -130,45 +120,60 @@ https://benyi-ops-v2.onrender.com
 
 以后员工就打开这个网址登录。
 
-默认账号仍然是：
+## 默认账号
 
-- 老板：admin
-- 轻松：qingsong
-- 王文芳：wangwenfang
-- 谢秀平：xiexiu-ping
-- 文员：clerk
+老板：
 
-密码取决于你首次部署时设置的环境变量：
+```text
+账号：admin
+密码：BENYI_ADMIN_PASSWORD 里设置的密码
+```
 
-- `BENYI_ADMIN_PASSWORD`
-- `BENYI_DEFAULT_STAFF_PASSWORD`
+员工账号：
 
-如果你没有设置环境变量，则默认仍是：
+```text
+轻松：qingsong
+王文芳：wangwenfang
+谢秀平：xiexiu-ping
+文员：clerk
+```
 
-- admin / admin123
-- 其他员工 / 123456
+员工初始密码：
 
-线上公开网址强烈建议不要用默认密码。
+```text
+BENYI_DEFAULT_STAFF_PASSWORD 里设置的密码
+```
 
-## 第四步：如何验证部署成功
+老板登录后，可以进入「员工账号管理」新增员工、改角色、停用账号、重置密码。
 
-1. 打开 Render 给你的网址。
-2. 用 `admin` 登录。
-3. 进入「员工账号管理」，确认员工账号都在。
-4. 新增一条学校数据。
-5. 用员工账号登录，新增门店日报或工作汇总。
-6. 老板账号刷新后能看到员工提交的数据。
-7. 在 Render 手动重启服务，再登录确认数据还在。
+## 如何验证数据不会丢
 
-## 后续升级为 PostgreSQL
+1. 用 Render 网址打开后台。
+2. 用老板账号登录。
+3. 新增一所学校。
+4. 新增一条 UGC 活动。
+5. 新增一条门店日报或工作汇总。
+6. 刷新网页，确认数据还在。
+7. 在 Render 里手动重启服务，再登录确认数据还在。
 
-SQLite + Persistent Disk 适合第一阶段上线使用。
+## 本地运行仍然可用
 
-当数据量变大、多人同时高频录入时，建议升级到 PostgreSQL：
+本地不设置 `DATABASE_URL` 时，仍然使用：
 
-1. 在 Render 创建 PostgreSQL 数据库。
-2. 后端增加 PostgreSQL 数据库连接。
-3. 把 SQLite 旧数据迁移到 PostgreSQL。
-4. Render Web Service 使用 `DATABASE_URL` 连接数据库。
+```text
+data/benyi_v2.sqlite
+```
 
-目前这一步没有强制做，是为了保证第一版线上后台尽快可运行。
+启动方式仍然是：
+
+```bash
+python3 server.py
+```
+
+如果本地也想连接云数据库，可以先安装依赖：
+
+```bash
+pip3 install -r requirements.txt
+```
+
+然后设置 `DATABASE_URL` 再启动。

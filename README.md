@@ -10,7 +10,9 @@
 - 月度汇总
 - CSV 导入导出
 
-当前版本是本地可运行版本，数据保存到 SQLite 数据库文件里，不再使用浏览器 localStorage。
+当前版本本地运行时使用 SQLite 数据库文件，不再使用浏览器 localStorage。
+
+线上部署时支持连接云 PostgreSQL 数据库。这样可以不购买 Render 持久磁盘，员工通过公开网址录入的数据会保存到云数据库里。
 
 如果要部署到线上服务器，让员工通过公开网址访问，请看：
 
@@ -20,9 +22,13 @@ DEPLOY_RENDER.md
 
 ## 如何安装依赖
 
-这个版本不需要安装复杂依赖。
+本地试用不需要安装复杂依赖，Mac 一般自带 `python3`，直接使用即可。
 
-Mac 一般自带 `python3`，直接使用即可。
+如果要连接线上 PostgreSQL 数据库，需要先安装依赖：
+
+```bash
+pip3 install -r requirements.txt
+```
 
 如果不确定有没有 Python，可以打开「终端」输入：
 
@@ -109,13 +115,15 @@ http://192.168.1.23:8000
 
 ## 数据库保存在哪里
 
-数据库文件在：
+本地运行时，数据库文件在：
 
 ```text
 /Users/xuzirui/Documents/Codex/2026-06-06/0-mvp-1-2-3-4/data/benyi_v2.sqlite
 ```
 
 只要这个文件还在，刷新网页或重启服务后数据都不会丢。
+
+线上部署时，如果设置了 `DATABASE_URL`，数据会保存到云 PostgreSQL 数据库，不再保存到本机 SQLite 文件。
 
 ## 如何重置数据
 
@@ -186,22 +194,22 @@ python3 server.py
 
 ## 后续部署到线上网站的方案
 
-如果希望员工不在同一个 Wi-Fi 也能访问，就需要部署到线上服务器。
+如果希望员工不在同一个 Wi-Fi 也能访问，可以部署到 Render，并连接免费云 PostgreSQL 数据库。具体步骤看：
 
-推荐正式方案：
+```text
+DEPLOY_RENDER.md
+```
 
-1. 购买云服务器。
-2. 绑定域名，例如 `admin.benyi.com`。
-3. 配置 HTTPS。
-4. 用云数据库或把 SQLite 升级为 PostgreSQL。
-5. 增加自动备份。
-6. 增加员工操作日志。
-7. 增加更严格的登录安全策略。
-8. 接入企微客户导入。
-9. 接入小程序订单同步。
-10. 增加老板微信日报推送。
+后续正式升级方向：
 
-线上部署需要服务器账号、域名和备案等信息，不能只靠本地文件完成。
+1. 绑定独立域名，例如 `admin.benyi.com`。
+2. 增加自动数据库备份。
+3. 增加员工操作日志。
+4. 增加更严格的登录安全策略。
+5. 接入企微客户导入。
+6. 接入小程序订单同步。
+7. 增加老板微信日报推送。
+8. 数据量变大后升级到更高规格数据库。
 
 ## 文件说明
 
@@ -209,4 +217,6 @@ python3 server.py
 - `index.html`：前端页面入口。
 - `styles.css`：后台界面样式。
 - `app.js`：前端交互逻辑。
-- `data/benyi_v2.sqlite`：SQLite 数据库文件，启动后自动生成。
+- `data/benyi_v2.sqlite`：本地 SQLite 数据库文件，启动后自动生成。
+- `requirements.txt`：线上连接 PostgreSQL 需要的 Python 依赖。
+- `render.yaml`：Render 部署配置。

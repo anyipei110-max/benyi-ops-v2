@@ -16,14 +16,26 @@ from io import StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row as postgres_dict_row
+except ImportError:
+    psycopg = None
+    postgres_dict_row = None
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("BENYI_DATA_DIR") or os.environ.get("RENDER_DISK_PATH") or (BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "benyi_v2.sqlite"
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+USE_POSTGRES = bool(DATABASE_URL)
 HOST = os.environ.get("BENYI_HOST", "0.0.0.0")
 PORT = int(os.environ.get("BENYI_PORT", "8000"))
 SESSION_COOKIE = "benyi_session"
 SESSIONS = {}
+DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError,)
+if psycopg:
+    DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
 
 
 ROLES = {
@@ -198,6 +210,10 @@ def verify_password(password, password_hash):
 
 
 def db():
+    if USE_POSTGRES:
+        if not psycopg:
+            raise RuntimeError("线上数据库需要安装 psycopg，请先执行 pip install -r requirements.txt")
+        return psycopg.connect(DATABASE_URL, row_factory=postgres_dict_row)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -207,21 +223,31 @@ def dict_row(row):
     return dict(row) if row else None
 
 
+def sql_params(sql):
+    return sql.replace("?", "%s") if USE_POSTGRES else sql
+
+
 def execute(sql, params=()):
     with db() as conn:
+        sql = sql_params(sql)
+        if USE_POSTGRES and sql.lstrip().lower().startswith("insert") and " returning " not in sql.lower():
+            sql += " RETURNING id"
         cur = conn.execute(sql, params)
         conn.commit()
+        if USE_POSTGRES:
+            row = cur.fetchone()
+            return row["id"] if row and "id" in row else None
         return cur.lastrowid
 
 
 def query_one(sql, params=()):
     with db() as conn:
-        return dict_row(conn.execute(sql, params).fetchone())
+        return dict_row(conn.execute(sql_params(sql), params).fetchone())
 
 
 def query_all(sql, params=()):
     with db() as conn:
-        return [dict_row(row) for row in conn.execute(sql, params).fetchall()]
+        return [dict_row(row) for row in conn.execute(sql_params(sql), params).fetchall()]
 
 
 def text(value, default=""):
@@ -291,114 +317,229 @@ def row_count(table_name):
 
 
 def init_db():
-    DATA_DIR.mkdir(exist_ok=True)
+    if not USE_POSTGRES:
+        DATA_DIR.mkdir(exist_ok=True)
     with db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                username TEXT NOT NULL UNIQUE,
-                role TEXT NOT NULL,
-                phone TEXT DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'enabled',
-                password_hash TEXT NOT NULL,
-                password_changed INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                last_login_at TEXT
-            );
+        if USE_POSTGRES:
+            schema = [
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    username TEXT NOT NULL UNIQUE,
+                    role TEXT NOT NULL,
+                    phone TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'enabled',
+                    password_hash TEXT NOT NULL,
+                    password_changed INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS schools (
+                    id SERIAL PRIMARY KEY,
+                    school_name TEXT NOT NULL,
+                    school_type TEXT NOT NULL,
+                    area TEXT DEFAULT '朝阳市',
+                    address TEXT DEFAULT '',
+                    student_count INTEGER DEFAULT 0,
+                    owner_id INTEGER,
+                    owner_name TEXT DEFAULT '',
+                    priority TEXT DEFAULT 'B级',
+                    status TEXT DEFAULT '未启动',
+                    wechat_count INTEGER DEFAULT 0,
+                    trial_count INTEGER DEFAULT 0,
+                    order_count INTEGER DEFAULT 0,
+                    revenue DOUBLE PRECISION DEFAULT 0,
+                    main_product TEXT DEFAULT '校服',
+                    main_sizes TEXT DEFAULT '',
+                    next_action TEXT DEFAULT '',
+                    next_follow_up_time TEXT DEFAULT '',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS ugc_activities (
+                    id SERIAL PRIMARY KEY,
+                    activity_name TEXT NOT NULL,
+                    school_id INTEGER,
+                    school_name TEXT DEFAULT '',
+                    activity_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    goal TEXT DEFAULT '',
+                    start_date TEXT DEFAULT '',
+                    end_date TEXT DEFAULT '',
+                    owner_id INTEGER,
+                    owner_name TEXT DEFAULT '',
+                    budget DOUBLE PRECISION DEFAULT 0,
+                    signup_count INTEGER DEFAULT 0,
+                    submission_count INTEGER DEFAULT 0,
+                    content_count INTEGER DEFAULT 0,
+                    views_count INTEGER DEFAULT 0,
+                    likes_count INTEGER DEFAULT 0,
+                    comments_count INTEGER DEFAULT 0,
+                    new_wechat_count INTEGER DEFAULT 0,
+                    order_count INTEGER DEFAULT 0,
+                    revenue DOUBLE PRECISION DEFAULT 0,
+                    current_issue TEXT DEFAULT '',
+                    next_action TEXT DEFAULT '',
+                    next_follow_up_time TEXT DEFAULT '',
+                    review_summary TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS store_reports (
+                    id SERIAL PRIMARY KEY,
+                    report_date TEXT NOT NULL,
+                    store_name TEXT NOT NULL DEFAULT '本亦门店',
+                    reporter_id INTEGER,
+                    reporter_name TEXT DEFAULT '',
+                    new_members INTEGER DEFAULT 0,
+                    online_inquiries INTEGER DEFAULT 0,
+                    offline_visits INTEGER DEFAULT 0,
+                    orders_count INTEGER DEFAULT 0,
+                    sales_amount DOUBLE PRECISION DEFAULT 0,
+                    monthly_sales_target DOUBLE PRECISION DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(report_date, store_name)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS work_summaries (
+                    id SERIAL PRIMARY KEY,
+                    work_date TEXT NOT NULL,
+                    employee_id INTEGER,
+                    employee_name TEXT DEFAULT '',
+                    completed_items TEXT DEFAULT '',
+                    followed_schools TEXT DEFAULT '',
+                    follow_customer_count INTEGER DEFAULT 0,
+                    new_wechat_count INTEGER DEFAULT 0,
+                    ugc_progress TEXT DEFAULT '',
+                    issues TEXT DEFAULT '',
+                    tomorrow_plan TEXT DEFAULT '',
+                    need_boss_support TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(work_date, employee_id)
+                )
+                """,
+            ]
+            for statement in schema:
+                conn.execute(statement)
+        else:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    username TEXT NOT NULL UNIQUE,
+                    role TEXT NOT NULL,
+                    phone TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'enabled',
+                    password_hash TEXT NOT NULL,
+                    password_changed INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT
+                );
 
-            CREATE TABLE IF NOT EXISTS schools (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                school_name TEXT NOT NULL,
-                school_type TEXT NOT NULL,
-                area TEXT DEFAULT '朝阳市',
-                address TEXT DEFAULT '',
-                student_count INTEGER DEFAULT 0,
-                owner_id INTEGER,
-                owner_name TEXT DEFAULT '',
-                priority TEXT DEFAULT 'B级',
-                status TEXT DEFAULT '未启动',
-                wechat_count INTEGER DEFAULT 0,
-                trial_count INTEGER DEFAULT 0,
-                order_count INTEGER DEFAULT 0,
-                revenue REAL DEFAULT 0,
-                main_product TEXT DEFAULT '校服',
-                main_sizes TEXT DEFAULT '',
-                next_action TEXT DEFAULT '',
-                next_follow_up_time TEXT DEFAULT '',
-                notes TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+                CREATE TABLE IF NOT EXISTS schools (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    school_name TEXT NOT NULL,
+                    school_type TEXT NOT NULL,
+                    area TEXT DEFAULT '朝阳市',
+                    address TEXT DEFAULT '',
+                    student_count INTEGER DEFAULT 0,
+                    owner_id INTEGER,
+                    owner_name TEXT DEFAULT '',
+                    priority TEXT DEFAULT 'B级',
+                    status TEXT DEFAULT '未启动',
+                    wechat_count INTEGER DEFAULT 0,
+                    trial_count INTEGER DEFAULT 0,
+                    order_count INTEGER DEFAULT 0,
+                    revenue REAL DEFAULT 0,
+                    main_product TEXT DEFAULT '校服',
+                    main_sizes TEXT DEFAULT '',
+                    next_action TEXT DEFAULT '',
+                    next_follow_up_time TEXT DEFAULT '',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS ugc_activities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                activity_name TEXT NOT NULL,
-                school_id INTEGER,
-                school_name TEXT DEFAULT '',
-                activity_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                goal TEXT DEFAULT '',
-                start_date TEXT DEFAULT '',
-                end_date TEXT DEFAULT '',
-                owner_id INTEGER,
-                owner_name TEXT DEFAULT '',
-                budget REAL DEFAULT 0,
-                signup_count INTEGER DEFAULT 0,
-                submission_count INTEGER DEFAULT 0,
-                content_count INTEGER DEFAULT 0,
-                views_count INTEGER DEFAULT 0,
-                likes_count INTEGER DEFAULT 0,
-                comments_count INTEGER DEFAULT 0,
-                new_wechat_count INTEGER DEFAULT 0,
-                order_count INTEGER DEFAULT 0,
-                revenue REAL DEFAULT 0,
-                current_issue TEXT DEFAULT '',
-                next_action TEXT DEFAULT '',
-                next_follow_up_time TEXT DEFAULT '',
-                review_summary TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+                CREATE TABLE IF NOT EXISTS ugc_activities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    activity_name TEXT NOT NULL,
+                    school_id INTEGER,
+                    school_name TEXT DEFAULT '',
+                    activity_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    goal TEXT DEFAULT '',
+                    start_date TEXT DEFAULT '',
+                    end_date TEXT DEFAULT '',
+                    owner_id INTEGER,
+                    owner_name TEXT DEFAULT '',
+                    budget REAL DEFAULT 0,
+                    signup_count INTEGER DEFAULT 0,
+                    submission_count INTEGER DEFAULT 0,
+                    content_count INTEGER DEFAULT 0,
+                    views_count INTEGER DEFAULT 0,
+                    likes_count INTEGER DEFAULT 0,
+                    comments_count INTEGER DEFAULT 0,
+                    new_wechat_count INTEGER DEFAULT 0,
+                    order_count INTEGER DEFAULT 0,
+                    revenue REAL DEFAULT 0,
+                    current_issue TEXT DEFAULT '',
+                    next_action TEXT DEFAULT '',
+                    next_follow_up_time TEXT DEFAULT '',
+                    review_summary TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS store_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                report_date TEXT NOT NULL,
-                store_name TEXT NOT NULL DEFAULT '本亦门店',
-                reporter_id INTEGER,
-                reporter_name TEXT DEFAULT '',
-                new_members INTEGER DEFAULT 0,
-                online_inquiries INTEGER DEFAULT 0,
-                offline_visits INTEGER DEFAULT 0,
-                orders_count INTEGER DEFAULT 0,
-                sales_amount REAL DEFAULT 0,
-                monthly_sales_target REAL DEFAULT 0,
-                notes TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(report_date, store_name)
-            );
+                CREATE TABLE IF NOT EXISTS store_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    report_date TEXT NOT NULL,
+                    store_name TEXT NOT NULL DEFAULT '本亦门店',
+                    reporter_id INTEGER,
+                    reporter_name TEXT DEFAULT '',
+                    new_members INTEGER DEFAULT 0,
+                    online_inquiries INTEGER DEFAULT 0,
+                    offline_visits INTEGER DEFAULT 0,
+                    orders_count INTEGER DEFAULT 0,
+                    sales_amount REAL DEFAULT 0,
+                    monthly_sales_target REAL DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(report_date, store_name)
+                );
 
-            CREATE TABLE IF NOT EXISTS work_summaries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                work_date TEXT NOT NULL,
-                employee_id INTEGER,
-                employee_name TEXT DEFAULT '',
-                completed_items TEXT DEFAULT '',
-                followed_schools TEXT DEFAULT '',
-                follow_customer_count INTEGER DEFAULT 0,
-                new_wechat_count INTEGER DEFAULT 0,
-                ugc_progress TEXT DEFAULT '',
-                issues TEXT DEFAULT '',
-                tomorrow_plan TEXT DEFAULT '',
-                need_boss_support TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(work_date, employee_id)
-            );
-            """
-        )
+                CREATE TABLE IF NOT EXISTS work_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_date TEXT NOT NULL,
+                    employee_id INTEGER,
+                    employee_name TEXT DEFAULT '',
+                    completed_items TEXT DEFAULT '',
+                    followed_schools TEXT DEFAULT '',
+                    follow_customer_count INTEGER DEFAULT 0,
+                    new_wechat_count INTEGER DEFAULT 0,
+                    ugc_progress TEXT DEFAULT '',
+                    issues TEXT DEFAULT '',
+                    tomorrow_plan TEXT DEFAULT '',
+                    need_boss_support TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(work_date, employee_id)
+                );
+                """
+            )
         conn.commit()
     seed_defaults()
 
@@ -935,7 +1076,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.api(method, path, query)
             else:
                 self.static(path)
-        except sqlite3.IntegrityError as exc:
+        except DB_INTEGRITY_ERRORS as exc:
             self.error_json(400, "保存失败：可能已经存在同一天的记录，或账号重复。")
         except PermissionError as exc:
             self.error_json(403, str(exc))
@@ -964,7 +1105,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def api(self, method, path, query):
         if path == "/api/health" and method == "GET":
-            return self.json({"ok": True, "database": str(DB_PATH)})
+            return self.json({"ok": True, "database": "PostgreSQL" if USE_POSTGRES else str(DB_PATH)})
         if path == "/api/login" and method == "POST":
             return self.login()
         if path == "/api/logout" and method == "POST":
@@ -1079,7 +1220,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 "schools": [{"id": row["id"], "name": row["school_name"]} for row in visible_schools(user)],
                 "today": today_string(),
                 "month": month_string(),
-                "dbPath": str(DB_PATH),
+                "dbPath": "PostgreSQL 云数据库" if USE_POSTGRES else str(DB_PATH),
             }
         )
 
@@ -1321,7 +1462,10 @@ def main():
             print("员工同 Wi-Fi 访问：请查看本机 Wi-Fi IP 后使用 http://你的IP:8000")
     else:
         print(f"打开地址：http://{HOST}:{PORT}")
-    print(f"数据库文件：{DB_PATH}")
+    if USE_POSTGRES:
+        print("数据库：PostgreSQL 云数据库")
+    else:
+        print(f"数据库文件：{DB_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
